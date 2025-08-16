@@ -1,6 +1,9 @@
+import { encryptMessage, decryptMessage, generateSharedKey } from "./aes.js";
+import { arrayBufferToBase64, base64ToArrayBuffer } from "./bufferarray.js";
 const socket = io();
 let currentRoom = null;
 let username = null;
+let aeskey = null;
 
 // DOM elements
 const roomSetup = document.getElementById("room-setup");
@@ -34,7 +37,7 @@ roomInput.addEventListener("keypress", (e) => {
   if (e.key === "Enter") joinRoom();
 });
 
-function joinRoom() {
+async function joinRoom() {
   const enteredUsername = usernameInput.value.trim();
   const enteredRoom = roomInput.value.trim();
 
@@ -50,6 +53,9 @@ function joinRoom() {
 
   username = enteredUsername;
   currentRoom = enteredRoom;
+
+  // GENERATE ACTUAL AES KEY
+  aeskey = await generateSharedKey(currentRoom);
 
   // Join the room
   socket.emit("join", currentRoom);
@@ -70,14 +76,20 @@ messageForm.addEventListener("submit", (e) => {
   sendMessage();
 });
 
-function sendMessage() {
+async function sendMessage() {
   const message = messageInput.value.trim();
-  if (!message || !currentRoom || !username) return;
+  if (!message || !currentRoom || !username || !aeskey) return;
+
+  // Generate random IV
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
+  // ACTUAL AES ENCRYPTION HAPPENS HERE
+  const encrypted = await encryptMessage(message, aeskey, iv);
 
   // Create payload (using your server's expected format)
   const payload = {
-    iv: btoa(Math.random().toString(36)), // dummy values for compatibility
-    ct: btoa(message), // base64 encoded message for compatibility
+    iv: arrayBufferToBase64(iv), // dummy values for compatibility
+    ct: arrayBufferToBase64(encrypted), // base64 encoded message for compatibility
     ts: Date.now(),
   };
 
@@ -94,13 +106,18 @@ function sendMessage() {
 }
 
 // Receive messages
-socket.on("chat:ciphertext", ({ from, payload }) => {
+socket.on("chat:ciphertext", async ({ from, payload }) => {
   if (from !== username) {
     // Don't show our own messages again
     try {
       // Decode the message (assuming it's base64 encoded plaintext for compatibility)
-      const message = atob(payload.ct);
-      addMessage(from, message, false);
+      const iv = base64ToArrayBuffer(payload.iv);
+      const ciphertext = base64ToArrayBuffer(payload.ct);
+
+      // ACTUAL AES DECRYPTION HAPPENS HERE
+      const decryptedMessage = await decryptMessage(ciphertext, aeskey, iv);
+
+      addMessage(from, decryptedMessage, false);
     } catch (err) {
       console.error("Error decoding message:", err);
       addSystemMessage(`Could not decode message from ${from}`);

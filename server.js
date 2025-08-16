@@ -13,8 +13,9 @@ app.use(express.static("public")); // serves index.html
 io.on("connection", (socket) => {
   socket.on("join", (room) => socket.join(room));
 
-  
   socket.on("chat:ciphertext", ({ room, from, payload }) => {
+    console.log(payload);
+
     io.to(room).emit("chat:ciphertext", { from, payload });
   });
 });
